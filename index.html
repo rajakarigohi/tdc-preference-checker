@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-Send Preference Checker – Prototype</title>
+<style>
+  :root { --ink:#1f2328; --muted:#667085; --line:#e4e7ec; --bg:#f7f8fa; --card:#fff;
+          --ok:#12714a; --okbg:#e6f4ec; --bad:#b42318; --badbg:#fdecea; --warn:#93600a; --warnbg:#fdf3dc; --accent:#3b4cca; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+  header { padding:20px 24px 0; max-width:1080px; margin:0 auto; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  header p { margin:0; color:var(--muted); }
+  .note { margin-top:10px; padding:8px 12px; background:var(--warnbg); color:var(--warn); border-radius:8px; font-size:13px; }
+  nav { display:flex; gap:4px; margin-top:16px; border-bottom:1px solid var(--line); }
+  nav button { border:0; background:none; padding:10px 14px; font:inherit; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; }
+  nav button.on { color:var(--accent); border-color:var(--accent); font-weight:600; }
+  main { max-width:1080px; margin:0 auto; padding:20px 24px 48px; }
+  .grid { display:grid; grid-template-columns:300px 1fr; gap:20px; align-items:start; }
+  @media (max-width:800px) { .grid { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { font-size:15px; margin:0 0 10px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+  select, textarea, input[type=text] { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; }
+  textarea { min-height:90px; resize:vertical; }
+  table.prefs { width:100%; border-collapse:collapse; font-size:14px; margin-top:12px; }
+  table.prefs td { padding:6px 0; border-top:1px solid var(--line); vertical-align:top; }
+  table.prefs td:last-child { text-align:right; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .tag.hard { background:var(--badbg); color:var(--bad); }
+  .tag.flex { background:#eef0f4; color:var(--muted); }
+  .tag.pass { background:var(--okbg); color:var(--ok); }
+  .tag.block { background:var(--badbg); color:var(--bad); }
+  .tag.over { background:var(--warnbg); color:var(--warn); }
+  .stats { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .stat { flex:1; min-width:140px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .stat b { display:block; font-size:22px; }
+  .stat span { color:var(--muted); font-size:13px; }
+  .profile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:10px; }
+  .profile.blocked { border-left:4px solid var(--bad); }
+  .profile.passed { border-left:4px solid var(--ok); }
+  .profile.overridden { border-left:4px solid var(--warn); }
+  .row { display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap; }
+  .name { font-weight:600; }
+  .meta { color:var(--muted); font-size:13px; }
+  .score { font-weight:600; }
+  ul.reasons { margin:8px 0 0; padding-left:18px; font-size:14px; }
+  ul.reasons li.bad { color:var(--bad); }
+  ul.reasons li.soft { color:var(--warn); }
+  .btn { border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 12px; font:inherit; font-size:13px; cursor:pointer; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .override { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  .override input { flex:1; min-width:200px; }
+  .samples { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 12px; }
+  .result { margin-top:14px; }
+  .result dl { display:grid; grid-template-columns:200px 1fr; gap:8px 12px; margin:0; }
+  .result dt { color:var(--muted); font-size:13px; }
+  .result dd { margin:0; }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow:auto; font-size:13px; margin:12px 0 0; }
+  .hidden { display:none; }
+  .log { font-size:13px; color:var(--muted); margin-top:16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pre-Send Preference Checker</h1>
+  <p>Checks candidate profiles against a client's stated preferences before the matchmaker emails them.</p>
+  <div class="note">Prototype with mocked data. All people shown are fictional. The feedback tagger uses keyword rules here as a stand-in for the LLM call described in the solution.</div>
+  <nav>
+    <button id="tab-check" class="on" type="button">1. Check profiles before sending</button>
+    <button id="tab-tag" type="button">2. Tag rejection feedback</button>
+  </nav>
+</header>
+
+<main>
+  <section id="view-check">
+    <div class="grid">
+      <div class="card">
+        <label for="client">Client</label>
+        <select id="client"></select>
+        <table class="prefs" id="prefs"></table>
+      </div>
+      <div>
+        <div class="stats" id="stats"></div>
+        <div id="profiles"></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-tag" class="hidden">
+    <div class="grid">
+      <div class="card">
+        <label for="client2">Client who rejected the profile</label>
+        <select id="client2"></select>
+        <table class="prefs" id="prefs2"></table>
+      </div>
+      <div class="card">
+        <h2>Rejection feedback (free text from the client's email)</h2>
+        <div class="samples" id="samples"></div>
+        <textarea id="feedback" placeholder="Paste the client's reply here"></textarea>
+        <p><button class="btn primary" id="run" type="button">Tag feedback</button></p>
+        <div class="result" id="result"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ---------- Mock data ---------- */
+// Each preference: v = value, hard = true means deal-breaker, false means flexible.
+const CLIENTS = [
+  { id: "c1", name: "Ananya S.", about: "31, Product Manager, Bengaluru", matchmaker: "Matchmaker B",
+    prefs: {
+      age:      { v: [30, 36], hard: false },
+      height:   { v: 172, hard: false },
+      city:     { v: ["Bengaluru", "Hyderabad", "Pune"], hard: false },
+      diet:     { v: ["Vegetarian", "Eggetarian"], hard: false },
+      smoking:  { v: "No", hard: true },
+      children: { v: "Wants children", hard: true },
+      marital:  { v: ["Never married"], hard: false }
+    } },
+  { id: "c2", name: "Rohit M.", about: "34, Consultant, Mumbai", matchmaker: "Matchmaker A",
+    prefs: {
+      age:      { v: [27, 33], hard: true },
+      city:     { v: ["Mumbai", "Pune"], hard: true },
+      diet:     { v: ["Vegetarian", "Eggetarian", "Non-vegetarian"], hard: false },
+      smoking:  { v: "No", hard: false },
+      drinking: { v: "No", hard: false },
+      children: { v: "Wants children", hard: false },
+      marital:  { v: ["Never married", "Divorced"], hard: false }
+    } },
+  { id: "c3", name: "Meera K.", about: "36, Surgeon, Delhi", matchmaker: "Matchmaker B",
+    prefs: {
+      age:      { v: [35, 44], hard: false },
+      height:   { v: 170, hard: false },
+      city:     { v: ["Delhi", "Gurgaon", "Noida"], hard: false },
+      smoking:  { v: "No", hard: true },
+      drinking: { v: "No", hard: false },
+      children: { v: "Does not want children", hard: true },
+      marital:  { v: ["Never married", "Divorced"], hard: false }
+    } }
+];
+
+// Candidate pool the matchmaker has shortlisted for each client.
+const POOL = {
+  c1: [
+    { id: "p1", name: "Karthik R.", age: 33, height: 178, city: "Bengaluru", diet: "Vegetarian", smoking: "No", drinking: "Socially", children: "Wants children", marital: "Never married" },
+    { id: "p2", name: "Arjun V.", age: 35, height: 180, city: "Hyderabad", diet: "Non-vegetarian", smoking: "Yes", drinking: "Socially", children: "Wants children", marital: "Never married" },
+    { id: "p3", name: "Sameer D.", age: 32, height: 175, city: "Pune", diet: "Eggetarian", smoking: "No", drinking: "No", children: "Does not want children", marital: "Never married" },
+    { id: "p4", name: "Nikhil P.", age: 38, height: 170, city: "Mumbai", diet: "Vegetarian", smoking: "No", drinking: "No", children: "Wants children", marital: "Divorced" },
+    { id: "p5", name: "Varun T.", age: 31, height: 176, city: "Bengaluru", diet: "Non-vegetarian", smoking: "No", drinking: "Socially", children: "Wants children", marital: "Never married" },
+    { id: "p6", name: "Aditya N.", age: 34, height: 183, city: "Chennai", diet: "Vegetarian", smoking: "No", drinking: "No", children: "Wants children", marital: "Never married" }
+  ],
+  c2: [
+    { id: "p7", name: "Priya L.", age: 29, height: 162, city: "Mumbai", diet: "Vegetarian", smoking: "No", drinking: "No", children: "Wants children", marital: "Never married" },
+    { id: "p8", name: "Sneha G.", age: 35, height: 165, city: "Mumbai", diet: "Non-vegetarian", smoking: "No", drinking: "Socially", children: "Wants children", marital: "Never married" },
+    { id: "p9", name: "Kavya B.", age: 30, height: 158, city: "Bengaluru", diet: "Vegetarian", smoking: "No", drinking: "No", children: "Wants children", marital: "Never married" },
+    { id: "p10", name: "Ishita C.", age: 31, height: 167, city: "Pune", diet: "Eggetarian", smoking: "No", drinking: "Socially", children: "Open to either", marital: "Divorced" },
+    { id: "p11", name: "Tanvi J.", age: 28, height: 160, city: "Mumbai", diet: "Non-vegetarian", smoking: "Yes", drinking: "Socially", children: "Wants children", marital: "Never married" }
+  ],
+  c3: [
+    { id: "p12", name: "Vikram A.", age: 39, height: 177, city: "Delhi", diet: "Non-vegetarian", smoking: "No", drinking: "Socially", children: "Does not want children", marital: "Divorced" },
+    { id: "p13", name: "Rahul S.", age: 37, height: 174, city: "Gurgaon", diet: "Vegetarian", smoking: "No", drinking: "No", children: "Wants children", marital: "Never married" },
+    { id: "p14", name: "Manish O.", age: 42, height: 172, city: "Noida", diet: "Vegetarian", smoking: "Yes", drinking: "No", children: "Does not want children", marital: "Never married" },
+    { id: "p15", name: "Dev H.", age: 40, height: 181, city: "Delhi", diet: "Eggetarian", smoking: "No", drinking: "No", children: "Open to either", marital: "Never married" },
+    { id: "p16", name: "Siddharth W.", age: 46, height: 168, city: "Jaipur", diet: "Vegetarian", smoking: "No", drinking: "No", children: "Does not want children", marital: "Divorced" }
+  ]
+};
+
+/* ---------- Rules: one deterministic check per preference field ---------- */
+const RULES = {
+  age:      { label: "Age",            want: v => v[0] + "–" + v[1],          has: p => p.age + " yrs",
+              ok: (p, v) => p.age >= v[0] && p.age <= v[1] },
+  height:   { label: "Minimum height", want: v => v + " cm or taller",        has: p => p.height + " cm",
+              ok: (p, v) => p.height >= v },
+  city:     { label: "City",           want: v => v.join(", "),               has: p => p.city,
+              ok: (p, v) => v.includes(p.city) },
+  diet:     { label: "Diet",           want: v => v.join(", "),               has: p => p.diet,
+              ok: (p, v) => v.includes(p.diet) },
+  smoking:  { label: "Smoking",        want: v => v === "No" ? "Non-smoker" : v, has: p => p.smoking === "Yes" ? "smokes" : "non-smoker",
+              ok: (p, v) => v !== "No" || p.smoking === "No" },
+  drinking: { label: "Drinking",       want: v => v === "No" ? "Does not drink" : v, has: p => p.drinking === "No" ? "does not drink" : "drinks " + p.drinking.toLowerCase(),
+              ok: (p, v) => v !== "No" || p.drinking === "No" },
+  children: { label: "Children",       want: v => v,                          has: p => p.children.toLowerCase(),
+              ok: (p, v) => p.children === v || p.children === "Open to either" },
+  marital:  { label: "Marital status", want: v => v.join(", "),               has: p => p.marital.toLowerCase(),
+              ok: (p, v) => v.includes(p.marital) }
+};
+
+// Core function: check one profile against one client's preferences.
+function checkProfile(profile, client) {
+  const hardFails = [], softFails = [];
+  let flexTotal = 0, flexMet = 0;
+  for (const key of Object.keys(client.prefs)) {
+    const pref = client.prefs[key], rule = RULES[key];
+    const ok = rule.ok(profile, pref.v);
+    if (!pref.hard) { flexTotal++; if (ok) flexMet++; }
+    if (!ok) {
+      const msg = rule.label + ": profile is " + rule.has(profile) + "; client wants " + rule.want(pref.v);
+      (pref.hard ? hardFails : softFails).push({ key, msg });
+    }
+  }
+  const fit = flexTotal === 0 ? 100 : Math.round((flexMet / flexTotal) * 100);
+  return { blocked: hardFails.length > 0, hardFails, softFails, fit };
+}
+
+// Rank a shortlist: passing profiles first (best fit on top), blocked ones last.
+function rankPool(pool, client) {
+  return pool.map(p => ({ profile: p, check: checkProfile(p, client) }))
+             .sort((a, b) => (a.check.blocked - b.check.blocked) || (b.check.fit - a.check.fit));
+}
+
+/* ---------- Rejection feedback tagger (keyword stand-in for the LLM) ---------- */
+const CATEGORIES = [
+  { id: "smoking",  label: "Smoking",              pref: "smoking",  words: ["smoke", "smoking", "cigarette"] },
+  { id: "drinking", label: "Drinking",             pref: "drinking", words: ["drink", "alcohol"] },
+  { id: "children", label: "Children",             pref: "children", words: ["kids", "children", "child", "family planning"] },
+  { id: "city",     label: "Location",             pref: "city",     words: ["city", "location", "relocat", "too far", "abroad", "distance", "long-distance", "long distance", "based in", "move to"] },
+  { id: "age",      label: "Age",                  pref: "age",      words: ["age", "too old", "too young", "older", "younger", "years old"] },
+  { id: "height",   label: "Height",               pref: "height",   words: ["height", "short", "tall"] },
+  { id: "diet",     label: "Diet",                 pref: "diet",     words: ["vegetarian", "non-veg", "nonveg", "meat", "diet", "vegan", "veg"] },
+  { id: "marital",  label: "Marital status",       pref: "marital",  words: ["divorc", "married before", "previous marriage"] },
+  { id: "career",   label: "Education / career",   pref: null,       words: ["education", "degree", "job", "career", "profession", "salary", "income", "work hours"] },
+  { id: "chemistry",label: "Looks / chemistry",    pref: null,       words: ["photo", "attract", "looks", "chemistry", "vibe", "spark", "connect", "my type"] }
+];
+
+function tagFeedback(text, client) {
+  const t = " " + text.toLowerCase() + " ";
+  const found = CATEGORIES.filter(c => c.words.some(w => {
+    // short words must match as whole words so "age" does not match "manage"
+    return w.length <= 4 ? new RegExp("\\b" + w + "\\b").test(t) : t.includes(w);
+  }));
+  if (found.length === 0) {
+    return { categories: [{ id: "other", label: "Other / unclear" }], alreadyStated: false, statedAs: [],
+             action: "Ask the client one follow-up question so the reason can be categorised." };
+  }
+  const statedAs = found.filter(c => c.pref && client.prefs[c.pref])
+                        .map(c => ({ label: c.label, hard: client.prefs[c.pref].hard }));
+  const alreadyStated = statedAs.length > 0;
+  let action;
+  if (alreadyStated && statedAs.some(s => s.hard)) action = "Avoidable share: this broke a stated deal-breaker. The checker would have blocked it.";
+  else if (alreadyStated) action = "Reason matches a flexible preference. Suggest the matchmaker confirms with the client whether it is now a deal-breaker.";
+  else if (found.some(c => c.pref)) action = "New preference: not on the client's profile yet. Suggest adding it.";
+  else action = "Not a structured preference. Log it and look for a pattern across this client's rejections.";
+  return { categories: found.map(c => ({ id: c.id, label: c.label })), alreadyStated, statedAs, action };
+}
+
+const SAMPLES = [
+  "He seems nice but I really can't be with someone who smokes, I told you this earlier.",
+  "She is based in Bengaluru and I am not looking at a long-distance thing right now.",
+  "Good profile on paper, but I just did not feel any spark from the photos.",
+  "He doesn't want kids, that is a non-negotiable for me.",
+  "Not sure, something feels off."
+];
+
+/* ---------- UI ---------- */
+function esc(s) { return String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
+
+function renderPrefs(client, el) {
+  let html = "<tr><td colspan='2'><b>" + esc(client.name) + "</b><br><span class='meta'>" + esc(client.about) + " · " + esc(client.matchmaker) + "</span></td></tr>";
+  for (const key of Object.keys(client.prefs)) {
+    const pref = client.prefs[key];
+    html += "<tr><td><span class='meta'>" + RULES[key].label + "</span><br>" + esc(RULES[key].want(pref.v)) + "</td><td>" +
+            (pref.hard ? "<span class='tag hard'>Deal-breaker</span>" : "<span class='tag flex'>Flexible</span>") + "</td></tr>";
+  }
+  el.innerHTML = html;
+}
+
+const overrides = {};   // profileId -> reason
+const overrideLog = [];
+
+function renderCheck() {
+  const client = CLIENTS.find(c => c.id === document.getElementById("client").value);
+  renderPrefs(client, document.getElementById("prefs"));
+  const ranked = rankPool(POOL[client.id], client);
+  const blocked = ranked.filter(r => r.check.blocked).length;
+  const total = ranked.length;
+  document.getElementById("stats").innerHTML =
+    "<div class='stat'><b>" + total + "</b><span>profiles shortlisted</span></div>" +
+    "<div class='stat'><b>" + (total - blocked) + "</b><span>pass all deal-breakers</span></div>" +
+    "<div class='stat'><b>" + blocked + "</b><span>blocked (" + Math.round(blocked / total * 100) + "% of shortlist would have been avoidable rejections)</span></div>";
+
+  document.getElementById("profiles").innerHTML = ranked.map(({ profile: p, check: c }) => {
+    const over = overrides[p.id];
+    const cls = c.blocked ? (over ? "overridden" : "blocked") : "passed";
+    const tag = c.blocked ? (over ? "<span class='tag over'>Override – will send</span>" : "<span class='tag block'>Blocked</span>") : "<span class='tag pass'>Pass</span>";
+    let reasons = c.hardFails.map(f => "<li class='bad'>Deal-breaker – " + esc(f.msg) + "</li>").join("") +
+                  c.softFails.map(f => "<li class='soft'>Flexible – " + esc(f.msg) + "</li>").join("");
+    if (!reasons) reasons = "<li>Meets every stated preference</li>";
+    let overrideUi = "";
+    if (c.blocked && !over) {
+      overrideUi = "<div class='override'><input type='text' id='why-" + p.id + "' placeholder='Reason for sending anyway (required)'>" +
+                   "<button class='btn' type='button' data-override='" + p.id + "'>Override and send</button></div>";
+    } else if (over) {
+      overrideUi = "<div class='meta' style='margin-top:8px'>Override reason logged: " + esc(over) + "</div>";
+    }
+    return "<div class='profile " + cls + "'><div class='row'><div><span class='name'>" + esc(p.name) + "</span> " + tag +
+           "<div class='meta'>" + p.age + " · " + p.height + " cm · " + esc(p.city) + " · " + esc(p.diet) + " · " + esc(p.marital) + "</div></div>" +
+           "<div class='score'>Fit " + c.fit + "%</div></div><ul class='reasons'>" + reasons + "</ul>" + overrideUi + "</div>";
+  }).join("");
+
+  document.getElementById("log").textContent = overrideLog.length
+    ? "Override log (reviewed weekly; accepted overrides show which deal-breakers are really flexible): " + overrideLog.join(" | ")
+    : "";
+}
+
+function renderTagView() {
+  const client = CLIENTS.find(c => c.id === document.getElementById("client2").value);
+  renderPrefs(client, document.getElementById("prefs2"));
+  document.getElementById("result").innerHTML = "";
+}
+
+function runTagger() {
+  const client = CLIENTS.find(c => c.id === document.getElementById("client2").value);
+  const text = document.getElementById("feedback").value.trim();
+  const out = document.getElementById("result");
+  if (!text) { out.innerHTML = "<span class='meta'>Enter some feedback first.</span>"; return; }
+  const r = tagFeedback(text, client);
+  const stated = r.alreadyStated
+    ? "<span class='tag block'>Yes</span> " + r.statedAs.map(s => esc(s.label) + " (" + (s.hard ? "deal-breaker" : "flexible") + ")").join(", ")
+    : "<span class='tag pass'>No</span>";
+  out.innerHTML = "<dl><dt>Category</dt><dd>" + r.categories.map(c => esc(c.label)).join(", ") + "</dd>" +
+    "<dt>Already in client's preferences?</dt><dd>" + stated + "</dd>" +
+    "<dt>Suggested action</dt><dd>" + esc(r.action) + "</dd></dl>" +
+    "<pre>" + esc(JSON.stringify({ client: client.id, categories: r.categories.map(c => c.id), already_stated: r.alreadyStated }, null, 2)) + "</pre>";
+}
+
+function showTab(which) {
+  document.getElementById("view-check").classList.toggle("hidden", which !== "check");
+  document.getElementById("view-tag").classList.toggle("hidden", which !== "tag");
+  document.getElementById("tab-check").classList.toggle("on", which === "check");
+  document.getElementById("tab-tag").classList.toggle("on", which === "tag");
+}
+
+function init() {
+  const opts = CLIENTS.map(c => "<option value='" + c.id + "'>" + esc(c.name) + " – " + esc(c.matchmaker) + "</option>").join("");
+  document.getElementById("client").innerHTML = opts;
+  document.getElementById("client2").innerHTML = opts;
+  document.getElementById("client").addEventListener("change", renderCheck);
+  document.getElementById("client2").addEventListener("change", renderTagView);
+  document.getElementById("tab-check").addEventListener("click", () => showTab("check"));
+  document.getElementById("tab-tag").addEventListener("click", () => showTab("tag"));
+  document.getElementById("run").addEventListener("click", runTagger);
+  document.getElementById("samples").innerHTML = SAMPLES.map((s, i) => "<button class='btn' type='button' data-sample='" + i + "'>Sample " + (i + 1) + "</button>").join("");
+  document.getElementById("samples").addEventListener("click", e => {
+    const i = e.target.getAttribute("data-sample");
+    if (i !== null) { document.getElementById("feedback").value = SAMPLES[i]; runTagger(); }
+  });
+  document.getElementById("profiles").addEventListener("click", e => {
+    const id = e.target.getAttribute("data-override");
+    if (!id) return;
+    const input = document.getElementById("why-" + id);
+    const why = input.value.trim();
+    if (!why) { input.focus(); input.placeholder = "A reason is required to override"; return; }
+    overrides[id] = why;
+    overrideLog.push(id + ": " + why);
+    renderCheck();
+  });
+  renderCheck();
+  renderTagView();
+}
+
+if (typeof document !== "undefined") init();
+if (typeof module !== "undefined") module.exports = { CLIENTS, POOL, checkProfile, rankPool, tagFeedback, SAMPLES };
+</script>
+</body>
+</html>
